@@ -1,0 +1,37 @@
+# cuda
+CUDA code for programming blog
+
+test1 - based this on an article I read about the fastest way to do a device-to-device memory copy on CUDA.
+The first kernel is from the article.  I thought I could do better than it, so I wrote it a few different ways to test out ideas.
+Using the API to do a memory copy was the fastest, but on my card, one of the new kernels was close.
+I was able to create a faster kernel over the one in the article and discovered that shifting the x,y grids around had more of an impact.
+The results I found:
+
+mem Elapsed time:  0.014950 s
+1 Elapsed time:  0.015593 s   <--- my goal was to beat this one.
+1 Elapsed time:  0.015211 s
+2 Elapsed time:  0.015848 s
+2 Elapsed time:  0.015538 s
+2 Elapsed time:  0.015260 s
+3 Elapsed time:  0.015017 s
+3a Elapsed time:  0.015065 s
+4 Elapsed time:  0.018367 s
+4 Elapsed time:  0.017119 s
+
+(first number is the kernel number, the timings vary because of changing the ratio of x, y thread blocks)
+
+I'll add more context in the article, and here when I write it.  The code is straight forward, you can look at it and see how I varied the blocks and copies to get different timings.
+
+The odd thing - the above timings are using the CUDA events.  I then tried measuring with nvprof...  there, my kernel #3 and 3a were faster than the API!
+
+Time(%)      Time     Calls       Avg       Min       Max  Name
+ 24.30%  465.03ms        30  15.501ms  14.954ms  16.618ms  copy2(float*, float const *)
+ 18.43%  352.72ms        20  17.636ms  16.927ms  18.224ms  copy4(float*, float const *)
+ 16.08%  307.73ms        20  15.387ms  15.037ms  16.335ms  copy1(float*, float const *)
+ 10.31%  197.24ms         1  197.24ms  197.24ms  197.24ms  [CUDA memcpy DtoH]
+  7.84%  149.96ms        10  14.996ms  14.922ms  15.416ms  [CUDA memcpy DtoD]
+  7.83%  149.84ms        10  14.984ms  14.803ms  15.843ms  copy3a(float*, float const *)
+  7.81%  149.39ms        10  14.939ms  14.723ms  15.728ms  copy3(float*, float const *)
+  7.41%  141.78ms         1  141.78ms  141.78ms  141.78ms  [CUDA memcpy HtoD]
+
+Not by much... but I had written those kernels based on the timings I was getting for the other ones, so I was glad to see that the scientific method works.  :)
