@@ -5,7 +5,6 @@
 #define __DRIVER_TYPES_H__
 #include "helper_cuda.h"
 
-const int LINEAR_THREADS = 1024;
 
 const int TILE_DIM = 32;
 const int BLOCK_ROWS = 8;
@@ -42,8 +41,14 @@ __global__ void copy3(float *odata, const float *idata) {
 }
 
 __global__ void copy3a(float *odata, const float *idata) {
-    int tid = blockIdx.x * LINEAR_THREADS + threadIdx.x;
-    odata[tid] = idata[tid];
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    // adding this if slows this kernel down to less than copy3,
+    // but by a small amount, though makes it work in all memory size cases.
+    // it is a trade-off!  If one can guarantee totalElements vs blockDim.x, 
+    // then one can get the speed up by removing this check.
+    if (tid < totalElements) {
+        odata[tid] = idata[tid];
+    }
 }
 
 __global__ void copy4(float *odata, const float *idata) {
@@ -137,14 +142,27 @@ float measureCopy3(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     return elapsedTimeTotal / 10;
 }
 
+/*
+    changed this to use occupancy API.  it calculated the same numbers I had handcoded,
+    but this makes it past/future proof.  the copy3a kernel with this code to drive makes
+    the least assumptions about the hardware, and is the fastest.
+
+    https://devblogs.nvidia.com/parallelforall/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
+    was the article that covered the use of the occupancy api, and the code I copied for debug printing.
+*/
 float measureCopy3a(float *dev_dst, float *dev_src) {
+    int blockSize;
+    int minGridSize;
+    int gridSize;
+
+    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, copy3a, 0, 0);
+    gridSize = (totalElements + blockSize - 1) / blockSize;
+
     float elapsedTimeTotal = 0;
     for (int i=0; i<10; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
-        int threads = LINEAR_THREADS;
-        int blocks = totalElements / threads;
-        copy3a <<< blocks, threads >>>(dev_dst, dev_src);
+        copy3a <<< gridSize, blockSize >>>(dev_dst, dev_src);
         checkCudaErrors(cudaGetLastError());
         checkCudaErrors(cudaEventRecord(stop, 0));
         checkCudaErrors(cudaEventSynchronize(stop));
@@ -153,6 +171,20 @@ float measureCopy3a(float *dev_dst, float *dev_src) {
         checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
         elapsedTimeTotal += elapsedTime;
     }
+
+    int maxActiveBlocks;
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor( &maxActiveBlocks, 
+                                                 copy3a, blockSize, 
+                                                 0);
+    int device;
+    cudaDeviceProp props;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&props, device);
+    float occupancy = (maxActiveBlocks * blockSize / props.warpSize) / 
+                    (float)(props.maxThreadsPerMultiProcessor / 
+                            props.warpSize);
+    printf("   [Debugging Info for copy3a] Launched blocks of size %d. Theoretical occupancy: %f\n", 
+         blockSize, occupancy);
 
     return elapsedTimeTotal / 10;
 }
