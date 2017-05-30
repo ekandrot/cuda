@@ -5,7 +5,9 @@
 
 const int K = 10;
 const int TD = 1;
-const int totalElements = 4096;
+const int elementsPerRow = 42000;
+const int rows = 128;
+const int totalElements = elementsPerRow * rows;
 const int totalMemorySize = sizeof(float) * totalElements;
 
 /*
@@ -22,6 +24,8 @@ __device__ void find_and_insert(float *a, const int i, int j) {
 }
 
 __global__ void insertion_sort_k(float *a, const int count, const int k) {
+    int tid = threadIdx.x + blockDim.x * blockIdx.x;
+    a += tid * count;
     // sort initial k
     for (int i=1; i<k; ++i) {
         if (a[i-1] > a[i]) {
@@ -59,24 +63,31 @@ int main(int argc, char **argv) {
     h_a = (float*)malloc(totalMemorySize);
 
     for (int i=0; i<totalElements; ++i) {
-        h_a[i] = 4096-i;
+        h_a[i] = (-i/(float)elementsPerRow)*(i % elementsPerRow);
     }
-    h_a[totalElements-10] = 8.5;
+    //h_a[totalElements-10] = 8.5;
 
     float *d_a;
     checkCudaErrors(cudaMalloc((void**)&d_a, totalMemorySize));
     checkCudaErrors(cudaMemcpy(d_a, h_a, totalMemorySize, cudaMemcpyHostToDevice));
 
     dim3 t(TD, 1, 1);
-    dim3 b(1, 1, 1);
+    dim3 b(rows/TD, 1, 1);
 
-    insertion_sort_k<<<b,t>>>(d_a, totalElements, K);
+    insertion_sort_k<<<b,t>>>(d_a, elementsPerRow, K);
+    checkCudaErrors(cudaDeviceSynchronize());
 
     checkCudaErrors(cudaMemcpy(h_a, d_a, totalMemorySize, cudaMemcpyDeviceToHost));
-    for (int i=0; i<K; ++i) {
-        std::cout << h_a[i] << ", ";
+
+#if 0
+    for (int j=0; j<rows; ++j) {
+        for (int i=0; i<K; ++i) {
+            std::cout << h_a[i + j*elementsPerRow] << ", ";
+        }
+        std::cout << std::endl;
     }
     std::cout << std::endl;
+#endif
 
     checkCudaErrors(cudaFree(d_a));
     free(h_a);
