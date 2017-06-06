@@ -1,4 +1,6 @@
 #include <iostream>
+#include "ext_timer.h"
+#include "scheduler.h"
 
 #define __DRIVER_TYPES_H__
 #include "helper_cuda.h"
@@ -106,7 +108,7 @@ __global__ void shared_matmulx2(const float *a, const float *b, float *c) {
 
 
 void cpu_matmul(const float *a, const float *b, float *c) {
-    for (int x=0; x<4096; ++x) {
+    for (int x=0; x<4; ++x) {
         for (int y=0; y<4096; ++y) {
             float t = 0;
             for (int k=0; k<4096; ++k) {
@@ -116,6 +118,23 @@ void cpu_matmul(const float *a, const float *b, float *c) {
         }
     }
 }
+
+
+struct threaded_matmul : worker {
+    float *_a, *_b, *_c;
+    threaded_matmul(float *a, float *b, float *c) : _a(a), _b(b), _c(c) {}
+    void do_work(int work) {
+        int x = work % 4096;
+        int y = work / 4096;
+
+        // same code as cached kernel
+        float t = 0;
+        for (int k=0; k<4096; ++k) {
+            t += _a[k + y*4096] * _b[x + k*4096];
+        }
+        _c[x + y*4096] = t;
+    }
+};
 
 
 int main(int argc, char **argv) {
@@ -183,9 +202,24 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaEventDestroy(start));
     checkCudaErrors(cudaEventDestroy(stop));
 
-
     checkCudaErrors(cudaMemcpy(h_c, d_c, totalMemorySize, cudaMemcpyDeviceToHost));
-//    cpu_matmul(h_a, h_b, h_c);
+
+#if 0   // do CPU - 11 minutes single core, 2 minutes 8-ish cores
+    // clear memory again, for the CPU version
+    for (int i=0; i<totalElements; ++i) {
+        h_a[i] = 1;
+        h_b[i] = 1;
+        h_c[i] = 93;    // dummy value, to make sure we are doing work
+    }
+    double startTime = get_wall_time();
+    threaded_matmul tmatmul(h_a, h_b, h_c);
+    scheduler s(&tmatmul, 4096*4096);
+    s.run();
+    s.join();
+    // 11 minutes of run time...  cpu_matmul(h_a, h_b, h_c);
+    double endTime = get_wall_time();
+    printf("CPU Elapsed time:  %f sec\n", (float)(endTime-startTime));
+#endif
 
     for (int i=0; i<totalElements; ++i) {
         if (h_c[i] != 4096.0) {

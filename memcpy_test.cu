@@ -151,7 +151,7 @@ float measureCopy3(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     was the article that covered the use of the occupancy api, and the code I copied for debug printing.
 */
 float measureCopy3a(float *dev_dst, float *dev_src) {
-    int blockSize;
+    int blockSize=0; // to supress warning, assign to zero
     int minGridSize;
     int gridSize;
 

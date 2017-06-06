@@ -79,7 +79,7 @@ void profileCopies(float        *h_a,
   checkCuda( cudaEventElapsedTime(&time, startEvent, stopEvent) );
   printf("  Device to Host bandwidth (GB/s): %f\n", bytes * 1e-6 / time);
 
-  for (int i = 0; i < n; ++i) {
+  for (unsigned int i = 0; i < n; ++i) {
     if (h_a[i] != h_b[i]) {
       printf("*** %s transfers failed ***", desc);
       break;
@@ -110,7 +110,7 @@ int main()
   checkCuda( cudaMallocHost((void**)&h_bPinned, bytes) ); // host pinned
   checkCuda( cudaMalloc((void**)&d_a, bytes) );           // device
 
-  for (int i = 0; i < nElements; ++i) h_aPageable[i] = i;      
+  for (unsigned int i = 0; i < nElements; ++i) h_aPageable[i] = i;      
   memcpy(h_aPinned, h_aPageable, bytes);
   memset(h_bPageable, 0, bytes);
   memset(h_bPinned, 0, bytes);
