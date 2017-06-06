@@ -37,8 +37,30 @@ __global__ void tex_matmul(float *c) {
 
 
 __global__ void shared_matmul(const float *a, const float *b, float *c) {
-    __shared__ float sa[TD][TD+1];  // +1 doubles the speed
-    __shared__ float sb[TD][TD+1];
+    __shared__ float sa[TD][TD];
+    __shared__ float sb[TD][TD];
+    const int x = threadIdx.x + blockIdx.x * blockDim.x;
+    const int y = threadIdx.y + blockIdx.y * blockDim.y;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+
+    float t = 0;
+    for (int chunk=0; chunk < gridDim.x; ++chunk) {
+        sa[tx][ty] = a[tx+chunk*TD + y*4096];
+        sb[tx][ty] = b[x + (ty+chunk*TD)*4096];
+        __syncthreads();
+        for (int k=0; k<TD; ++k) {
+            t += sa[k][ty] * sb[tx][k];
+        }
+    }
+
+    c[x + y*4096] = t;
+}
+
+
+__global__ void shared_misaligned_matmul(const float *a, const float *b, float *c) {
+    __shared__ float sa[TD][TD+1];  // +1 increases speed slightly
+    __shared__ float sb[TD][TD+1];  // +1 doubles the speed
     const int x = threadIdx.x + blockIdx.x * blockDim.x;
     const int y = threadIdx.y + blockIdx.y * blockDim.y;
     const int tx = threadIdx.x;
@@ -135,7 +157,7 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaEventRecord(stop, 0));
     checkCudaErrors(cudaEventSynchronize(stop));
     checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
-    printf("cached Elapsed time:  %f ms\n", elapsedTime);
+    printf("texture Elapsed time:  %f ms\n", elapsedTime);
 
     checkCudaErrors(cudaEventRecord(start, 0));
     cache_matmul<<< b, t >>>(d_a, d_b, d_c);
@@ -150,6 +172,13 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaEventSynchronize(stop));
     checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
     printf("shared Elapsed time:  %f ms\n", elapsedTime);
+
+    checkCudaErrors(cudaEventRecord(start, 0));
+    shared_misaligned_matmul<<< b, t >>>(d_a, d_b, d_c);
+    checkCudaErrors(cudaEventRecord(stop, 0));
+    checkCudaErrors(cudaEventSynchronize(stop));
+    checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
+    printf("shared misaligned Elapsed time:  %f ms\n", elapsedTime);
 
     checkCudaErrors(cudaEventDestroy(start));
     checkCudaErrors(cudaEventDestroy(stop));
