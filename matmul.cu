@@ -54,6 +54,7 @@ __global__ void shared_matmul(const float *a, const float *b, float *c) {
         for (int k=0; k<TD; ++k) {
             t += sa[k][ty] * sb[tx][k];
         }
+        __syncthreads();
     }
 
     c[x + y*4096] = t;
@@ -76,6 +77,7 @@ __global__ void shared_misaligned_matmul(const float *a, const float *b, float *
         for (int k=0; k<TD; ++k) {
             t += sa[k][ty] * sb[tx][k];
         }
+        __syncthreads();
     }
 
     c[x + y*4096] = t;
@@ -100,6 +102,7 @@ __global__ void shared_matmulx2(const float *a, const float *b, float *c) {
         for (int k=0; k<2*TD; ++k) {
             t += sa[k][ty] * sb[tx][k];
         }
+        __syncthreads();
     }
 
     c[x + y*4096] = t;
