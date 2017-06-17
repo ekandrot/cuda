@@ -5,43 +5,45 @@
 #define __DRIVER_TYPES_H__
 #include "helper_cuda.h"
 
+const int LOOP = 1;
 
-const int TILE_DIM = 32;
-const int BLOCK_ROWS = 8;
-const int totalElements = 256 * 1024 * 1024;
-const int totalMemorySize = sizeof(float) * totalElements;
+
+const size_t TILE_DIM = 32;
+const size_t BLOCK_ROWS = 8;
+const size_t totalElements = 256 * 1024 * 1024l;
+const size_t totalMemorySize = sizeof(float) * totalElements;
 
 cudaEvent_t start, stop;
 
 __global__ void copy1(float *odata, const float *idata) {
-    int x = blockIdx.x * TILE_DIM + threadIdx.x;
-    int y = blockIdx.y * TILE_DIM + threadIdx.y;
-    int width = gridDim.x * TILE_DIM;
+    size_t x = blockIdx.x * TILE_DIM + threadIdx.x; // 0..31
+    size_t y = blockIdx.y * TILE_DIM + threadIdx.y; // 0..7
+    size_t width = gridDim.x * TILE_DIM;
 
-    for (int j=0; j<TILE_DIM; j+=BLOCK_ROWS) {
+    for (size_t j=0; j<TILE_DIM; j+=BLOCK_ROWS) {
         odata[(y+j)*width + x] = idata[(y+j)*width+x];
     }
 }
 
 __global__ void copy2(float *odata, const float *idata) {
-    int x = blockIdx.x * TILE_DIM + threadIdx.x;
-    int y = blockIdx.y * TILE_DIM + threadIdx.y*4;
-    int width = gridDim.x * TILE_DIM;
+    size_t x = blockIdx.x * TILE_DIM + threadIdx.x; // 0..31
+    size_t y = blockIdx.y * TILE_DIM + threadIdx.y*4;   // 0,4,8,16,20,24,28
+    size_t width = gridDim.x * TILE_DIM;
 
-    for (int j=0; j<4; ++j) {
+    for (size_t j=0; j<4; ++j) {
         odata[(y+j)*width + x] = idata[(y+j)*width+x];
     }
 }
 
 __global__ void copy3(float *odata, const float *idata) {
-    int x = blockIdx.x * TILE_DIM + threadIdx.x;
-    int y = blockIdx.y * TILE_DIM + threadIdx.y;
-    int width = gridDim.x * TILE_DIM;
+    size_t x = blockIdx.x * TILE_DIM + threadIdx.x;
+    size_t y = blockIdx.y * TILE_DIM + threadIdx.y;
+    size_t width = gridDim.x * TILE_DIM;
     odata[y*width + x] = idata[y*width+x];
 }
 
 __global__ void copy3a(float *odata, const float *idata) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     // adding this if slows this kernel down to less than copy3,
     // but by a small amount, though makes it work in all memory size cases.
     // it is a trade-off!  If one can guarantee totalElements vs blockDim.x, 
@@ -52,16 +54,16 @@ __global__ void copy3a(float *odata, const float *idata) {
 }
 
 __global__ void copy4(float *odata, const float *idata) {
-    int tid = threadIdx.x + blockDim.x * threadIdx.y;
+    size_t tid = threadIdx.x + blockDim.x * threadIdx.y;
     tid += blockDim.x * blockDim.y * blockIdx.x;
-    int width = blockDim.x * blockDim.y * gridDim.x;
+    size_t width = blockDim.x * blockDim.y * gridDim.x;
 
-    for (int j=0; j<totalElements-width; j+=width) {
+    for (size_t j=0; j<totalElements-width; j+=width) {
         odata[tid + j] = idata[tid + j];
     }
 
     // the final blocks that would overflow
-    int j=totalElements-width;
+    size_t j=totalElements-width;
     if (tid+j < totalElements) {
         odata[tid + j] = idata[tid + j];
     }
@@ -69,7 +71,7 @@ __global__ void copy4(float *odata, const float *idata) {
 
 float measureCudaMemCpy(float *dev_dst, float *dev_src) {
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (size_t i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         checkCudaErrors(cudaMemcpy(dev_dst, dev_src, totalMemorySize, cudaMemcpyDeviceToDevice));
@@ -82,12 +84,12 @@ float measureCudaMemCpy(float *dev_dst, float *dev_src) {
         elapsedTimeTotal += elapsedTime;
     }
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 float measureCopy1(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (size_t i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         dim3 THREADS(TILE_DIM, BLOCK_ROWS, 1);
@@ -101,12 +103,12 @@ float measureCopy1(float *dev_dst, float *dev_src, dim3 BLOCKS) {
         elapsedTimeTotal += elapsedTime;
     }
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 float measureCopy2(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (size_t i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         dim3 THREADS(TILE_DIM, BLOCK_ROWS, 1);
@@ -120,12 +122,12 @@ float measureCopy2(float *dev_dst, float *dev_src, dim3 BLOCKS) {
         elapsedTimeTotal += elapsedTime;
     }
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 float measureCopy3(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (size_t i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         dim3 THREADS(TILE_DIM, TILE_DIM, 1);
@@ -139,7 +141,7 @@ float measureCopy3(float *dev_dst, float *dev_src, dim3 BLOCKS) {
         elapsedTimeTotal += elapsedTime;
     }
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 /*
@@ -159,7 +161,7 @@ float measureCopy3a(float *dev_dst, float *dev_src) {
     gridSize = (totalElements + blockSize - 1) / blockSize;
 
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (int i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         copy3a <<< gridSize, blockSize >>>(dev_dst, dev_src);
@@ -183,15 +185,14 @@ float measureCopy3a(float *dev_dst, float *dev_src) {
     float occupancy = (maxActiveBlocks * blockSize / props.warpSize) / 
                     (float)(props.maxThreadsPerMultiProcessor / 
                             props.warpSize);
-    printf("   [Debugging Info for copy3a] Launched blocks of size %d. Theoretical occupancy: %f\n", 
-         blockSize, occupancy);
+    //printf("   [Debugging Info for copy3a] Launched blocks of size %d. Theoretical occupancy: %f\n", blockSize, occupancy);
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 float measureCopy4(float *dev_dst, float *dev_src, dim3 BLOCKS) {
     float elapsedTimeTotal = 0;
-    for (int i=0; i<10; ++i) {
+    for (size_t i=0; i<LOOP; ++i) {
         // do a device to device memory copy via kernel, and time it
         checkCudaErrors(cudaEventRecord(start, 0));
         dim3 THREADS(TILE_DIM, TILE_DIM, 1);
@@ -205,7 +206,7 @@ float measureCopy4(float *dev_dst, float *dev_src, dim3 BLOCKS) {
         elapsedTimeTotal += elapsedTime;
     }
 
-    return elapsedTimeTotal / 10;
+    return elapsedTimeTotal / LOOP;
 }
 
 int main(int argc, char **argv) {
@@ -222,7 +223,7 @@ int main(int argc, char **argv) {
 
     // fill memory on host side
     float theRand = rand();
-    for (int i=0; i<totalElements; ++i) {
+    for (size_t i=0; i<totalElements; ++i) {
         host_src[i] = theRand;
     }
 
@@ -273,9 +274,9 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaEventDestroy(stop));
 
     checkCudaErrors(cudaMemcpy(host_dst, dev_dst, totalMemorySize, cudaMemcpyDeviceToHost));
-    for (int i=0; i<totalElements; ++i) {
+    for (size_t i=0; i<totalElements; ++i) {
         if (host_dst[i] != host_src[i]) {
-            printf("*** First mismatch at %d.  Got %f, was expecting %f  ***\n", i, host_dst[i], host_src[i]);
+            printf("*** First mismatch at %ld.  Got %f, was expecting %f  ***\n", i, host_dst[i], host_src[i]);
             break;
         }
     }
@@ -287,3 +288,4 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
