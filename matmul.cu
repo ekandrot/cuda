@@ -5,7 +5,7 @@
 #define __DRIVER_TYPES_H__
 #include "helper_cuda.h"
 
-const int TD = 16;
+const int TD = 32;
 const int totalElements = 4096 * 4096;
 const int totalMemorySize = sizeof(float) * totalElements;
 
@@ -83,29 +83,39 @@ __global__ void shared_swapped_matmul(const float *a, const float *b, float *c) 
     c[x + y*4096] = t;
 }
 
+const size_t MULTI=8;
+const size_t TY=(32/MULTI);
 
-__global__ void shared_matmulx2(const float *a, const float *b, float *c) {
-    __shared__ float sa[TD*2][TD+1];
-    __shared__ float sb[TD][TD*2+1];
-    const int x = threadIdx.x + blockIdx.x * blockDim.x;
-    const int y = threadIdx.y + blockIdx.y * blockDim.y;
+__global__ void shared_matmul_unroll(const float *a, const float *b, float *c) {
+    __shared__ float sa[TD][TD];
+    __shared__ float sb[TD][TD];
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
+    const int x = tx + blockIdx.x * TD;
+    const int y = ty + blockIdx.y * TD;
 
-    float t = 0;
-    for (int chunk=0; chunk < gridDim.x; chunk += 2) {
-        sa[tx][ty] = a[tx+chunk*TD + y*4096];
-        sb[tx][ty] = b[x + (ty+chunk*TD)*4096];
-        sa[tx+TD][ty] = a[tx+(chunk+1)*TD + y*4096];
-        sb[tx][ty+TD] = b[x + (ty+(chunk+1)*TD)*4096];
+    float t[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    for (int chunk=0; chunk < gridDim.x; ++chunk) {
+        #pragma unroll
+        for (int i=0; i<MULTI; ++i) {
+            sa[ty+TY*i][tx] = a[tx+chunk*TD + (y + TY*i)*4096];
+            sb[ty+TY*i][tx] = b[x + (ty +chunk*TD + TY*i)*4096];
+        }
         __syncthreads();
-        for (int k=0; k<2*TD; ++k) {
-            t += sa[k][ty] * sb[tx][k];
+        #pragma unroll
+        for (int k=0; k<TD; ++k) {
+            float v = sb[k][tx];
+            #pragma unroll
+            for(int i=0; i<MULTI; ++i) {
+                t[i] += sa[ty+TY*i][k] * v;
+            }
         }
         __syncthreads();
     }
-
-    c[x + y*4096] = t;
+    #pragma unroll
+    for(int i=0; i<MULTI; ++i) {
+        c[x + (y+TY*i)*4096] = t[i];
+    }
 }
 
 
@@ -172,10 +182,8 @@ int main(int argc, char **argv) {
 
     dim3 t(TD, TD, 1);
     dim3 b(4096/TD, 4096/TD, 1);
-#if 1
-    shared_swapped_matmul<<< b, t >>>(d_a, d_b, d_c);
-#else
     float elapsedTime;
+
     checkCudaErrors(cudaEventRecord(start, 0));
     tex_matmul<<< b, t >>>(d_c);
     checkCudaErrors(cudaEventRecord(stop, 0));
@@ -202,8 +210,17 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaEventRecord(stop, 0));
     checkCudaErrors(cudaEventSynchronize(stop));
     checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
-    printf("shared misaligned Elapsed time:  %f ms\n", elapsedTime);
-#endif
+    printf("shared swapped Elapsed time:  %f ms\n", elapsedTime);
+
+    dim3 t2(TD, TD/MULTI, 1);
+    dim3 b2(4096/TD, 4096/TD, 1);
+    checkCudaErrors(cudaEventRecord(start, 0));
+    shared_matmul_unroll<<< b2, t2 >>>(d_a, d_b, d_c);
+    checkCudaErrors(cudaEventRecord(stop, 0));
+    checkCudaErrors(cudaEventSynchronize(stop));
+    checkCudaErrors(cudaEventElapsedTime(&elapsedTime, start, stop));
+    printf("shared unrolled Elapsed time:  %f ms\n", elapsedTime);
+
     checkCudaErrors(cudaEventDestroy(start));
     checkCudaErrors(cudaEventDestroy(stop));
 
